@@ -1,5 +1,6 @@
 #include "p16f882.inc"
-
+errorlevel -302
+    
 ; CONFIG1
 ; __config 0x20F2
  __CONFIG _CONFIG1, _FOSC_HS & _WDTE_OFF & _PWRTE_OFF & _MCLRE_ON & _CP_OFF & _CPD_OFF & _BOREN_OFF & _IESO_OFF & _FCMEN_OFF & _LVP_OFF
@@ -396,7 +397,8 @@ _Delay10us_0
 
 			;4 cycles (including call)
 	return	
-END
+
+    END
 
 
 
