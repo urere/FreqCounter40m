@@ -201,20 +201,22 @@ LCD_Init
 	call	Delay5ms
 
 				; Display on, no cursor, no blinking
-	movlw	0x28
+	movlw	0x0c
 	call	_LCD_WriteCommand
 	call	Delay5ms
 	
 	call	LCD_Clear
 	call	Delay5ms
 				; Left to right
-	movlw	0x28
+	movlw	0x06
 	call	_LCD_WriteCommand
 	call	Delay5ms
 
 	call	LCD_Clear
 				; Ready for data
-	bsf	LCD_CONTROL,LCD_RS	
+	bsf	LCD_CONTROL_SH,LCD_RS
+	movfw	LCD_CONTROL_SH
+	movwf	LCD_CONTROL	
 	
 	return
     
