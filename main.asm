@@ -1,5 +1,5 @@
 #include "p16f882.inc"
-errorlevel -302
+    errorlevel -302
     
 ; CONFIG1
 ; __config 0x20F2
@@ -19,12 +19,14 @@ errorlevel -302
 ; Bit 5	 IN   
 ; Bit 6	 IN   
 ; Bit 7	 IN   
-PORTATRIS   equ 0xF0
-LCD_D4	    equ	0
-LCD_D5	    equ	1
-LCD_D6	    equ	2
-LCD_D7	    equ	3
-LCD_DATA    equ	PORTA	    
+PORTATRIS	equ 0xf0
+LCD_D4		equ	0
+LCD_D5		equ	1
+LCD_D6		equ	2
+LCD_D7		equ	3
+LCD_DATA	equ	PORTA	    
+LCD_DATA_SH	equ	0x20
+LCD_SH_MASK	equ	0xf0
 	    
 ; PORT B 
 ; Bit 0	 OUT   LCD RS - Register Select
@@ -35,22 +37,25 @@ LCD_DATA    equ	PORTA
 ; Bit 5	 IN   
 ; Bit 6	 IN   
 ; Bit 7	 IN   
-PORTBTRIS   equ 0xF8
-LCD_RS	    equ	0
-LCD_EN	    equ	1
-LCD_CONTROL equ	PORTB	    
-LED	    equ	2	    
+PORTBTRIS	equ 0xf8
+LCD_RS		equ	0
+LCD_EN		equ	1
+LCD_CONTROL	equ	PORTB	    
+LCD_CONTROL_SH	equ	0x21	    
+LED		equ	2	    
 	    
 ; General Purpose Registers
-delay1	    equ	0x20	; Delay routines
-delay2	    equ	0x21	; Delay routines
-delay3	    equ	0x22	; Delay routines
-delay4	    equ	0x23	; Delay routines
+portASh	    equ 0x20	; Port A Shadow register
+portBSh	    equ 0x21	; Port B Shadow register
+delay1	    equ	0x22	; Delay routines
+delay2	    equ	0x23	; Delay routines
+delay3	    equ	0x24	; Delay routines
+delay4	    equ	0x25	; Delay routines
 	    
-lcd_byte    equ	0x24	; Temp storage when sending a byte in 4 bit mode
-lcd_tmpw    equ	0x25	; Temp w value when sending commands and data    
-
-debug	    equ	0x26    
+lcd_byte    equ	0x27	; Temp storage when sending a byte in 4 bit mode
+lcd_tmpw    equ	0x28	; Temp w value when sending commands and data    
+lcd_sh_tmp  equ	0x29	; Temp value when updating shadow register
+debug	    equ	0x2a    
  
 RES_VECT  CODE    0x0000            ; processor reset vector
     GOTO    START                   ; go to beginning of program
@@ -58,8 +63,7 @@ RES_VECT  CODE    0x0000            ; processor reset vector
 
 MAIN_PROG CODE                      ; let linker place main program
 
- 
-START
+START 
  
     ; ****************************************************************
     ; * INITIALISATION                                               *
@@ -72,8 +76,10 @@ START
     ; Ports
 	banksel	PORTA 
 	clrf	PORTA
+	clrf	portASh
 	banksel	PORTB 
 	clrf	PORTB
+	clrf	portBSh
 	banksel ANSEL 
 	clrf	ANSEL
 	banksel ANSELH 
@@ -123,10 +129,6 @@ START
 	call	LCD_Char
 	movlw	' '
 	call	LCD_Char
-	movlw	' '
-	call	LCD_Char
-	movlw	' '
-	call	LCD_Char
 	movlw	'W'
 	call	LCD_Char
 	movlw	'o'
@@ -139,9 +141,13 @@ START
 	call	LCD_Char
 	
 
-flash	bsf	PORTB,LED
+flash	bsf	portBSh,LED
+	movfw	portBSh
+	movwf	PORTB
 	call	Delay1s
-	bcf	PORTB,LED
+	bcf	portBSh,LED
+	movfw	portBSh
+	movwf	PORTB
 	call	Delay1s
 	goto	flash
 
@@ -163,8 +169,12 @@ flash	bsf	PORTB,LED
 ; Initialise the LCD
 LCD_Init    
 				; Clear control lines
-	bcf	LCD_CONTROL,LCD_RS	
-	bcf	LCD_CONTROL,LCD_EN
+	bcf	LCD_CONTROL_SH,LCD_RS
+	movfw	LCD_CONTROL_SH
+	movwf	LCD_CONTROL	
+	bcf	LCD_CONTROL_SH,LCD_EN
+	movfw	LCD_CONTROL_SH
+	movwf	LCD_CONTROL	
 		
 				; Wait for LCD to boot
 	call	Delay10ms
@@ -234,51 +244,88 @@ LCD_Clear
 ; Write COMMAND byte in w to LCD
 _LCD_WriteCommand
 	movwf	lcd_tmpw
-	bcf	LCD_CONTROL,LCD_RS	
-	call	Delay10us
+	bcf	LCD_CONTROL_SH,LCD_RS
+	movfw	LCD_CONTROL_SH
+	movwf	LCD_CONTROL	
+	call	Delay100us
 	movf	lcd_tmpw,0
 	goto	_LCD_WriteByte
 
 ; Write DATA byte in w to LCD
 _LCD_WriteData
 	movwf	lcd_tmpw
-	bsf	LCD_CONTROL,LCD_RS	
-	call	Delay10us
+	bsf	LCD_CONTROL_SH,LCD_RS
+	movfw	LCD_CONTROL_SH
+	movwf	LCD_CONTROL	
+	call	Delay100us
 	movf	lcd_tmpw,0
 	goto	_LCD_WriteByte
 	
 ; Write byte in w to LCD
 _LCD_WriteByte
-			    ; Upper 4 bits
+				; Upper 4 bits
 	movwf	lcd_byte
 	swapf	lcd_byte,0
 	andlw	0x0f
-	movwf	LCD_DATA	
-	bsf	LCD_CONTROL,LCD_EN
-	call	Delay10us
-	bcf	LCD_CONTROL,LCD_EN	
-	call	Delay10us
+	
+	movwf	lcd_sh_tmp	; Update the shadow data register
+	movfw	LCD_DATA_SH
+	andlw	LCD_SH_MASK
+	iorwf   lcd_sh_tmp,0
+	movwf   LCD_DATA_SH
+	movwf	LCD_DATA
+				; Set/Clear enable
+	bsf	LCD_CONTROL_SH,LCD_EN
+	movfw	LCD_CONTROL_SH
+	movwf	LCD_CONTROL	
+	call	Delay100us
+	bcf	LCD_CONTROL_SH,LCD_EN
+	movfw	LCD_CONTROL_SH
+	movwf	LCD_CONTROL	
+	call	Delay100us
 
-			    ; Lower 4 bits
+				; Lower 4 bits
 	movf	lcd_byte,0
 	andlw	0x0f
-	movwf	LCD_DATA	
-	bsf	LCD_CONTROL,LCD_EN
-	call	Delay10us
-	bcf	LCD_CONTROL,LCD_EN	
-	call	Delay10us
+	
+	movwf	lcd_sh_tmp	; Update the shadow data register
+	movfw	LCD_DATA_SH
+	andlw	LCD_SH_MASK
+	iorwf   lcd_sh_tmp,0
+	movwf   LCD_DATA_SH
+	movwf	LCD_DATA
+				; Set/Clear enable
+	bsf	LCD_CONTROL_SH,LCD_EN
+	movfw	LCD_CONTROL_SH
+	movwf	LCD_CONTROL	
+	call	Delay100us
+	bcf	LCD_CONTROL_SH,LCD_EN
+	movfw	LCD_CONTROL_SH
+	movwf	LCD_CONTROL	
+	call	Delay100us
 	
 	return
 
 ; Write nibble in w to LCD
 _LCD_WriteNibble
-			    ; Lower 4 bits only
+				; Lower 4 bits only
 	andlw	0x0f
-	movwf	LCD_DATA	
-	bsf	LCD_CONTROL,LCD_EN
-	call	Delay10us
-	bcf	LCD_CONTROL,LCD_EN	
-	call	Delay10us
+	
+	movwf	lcd_sh_tmp	; Update the shadow data register
+	movfw	LCD_DATA_SH
+	andlw	LCD_SH_MASK
+	iorwf   lcd_sh_tmp,0
+	movwf   LCD_DATA_SH
+	movwf	LCD_DATA
+				; Set/clear enable
+	bsf	LCD_CONTROL_SH,LCD_EN
+	movfw	LCD_CONTROL_SH
+	movwf	LCD_CONTROL	
+	call	Delay100us
+	bcf	LCD_CONTROL_SH,LCD_EN
+	movfw	LCD_CONTROL_SH
+	movwf	LCD_CONTROL	
+	call	Delay100us
 	
 	return
 	
