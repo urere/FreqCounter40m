@@ -56,6 +56,25 @@ lcd_byte    equ	0x27	; Temp storage when sending a byte in 4 bit mode
 lcd_tmpw    equ	0x28	; Temp w value when sending commands and data    
 lcd_sh_tmp  equ	0x29	; Temp value when updating shadow register
 debug	    equ	0x2a    
+
+byte0	    equ	0x30	; BCD - in - low byte
+byte1	    equ	0x31
+byte2	    equ	0x32
+byte3	    equ	0x33	; BCD - in - high byte
+   
+r0	    equ	0x34	; BCD - out
+r1	    equ	0x35
+r2	    equ	0x36
+r3	    equ	0x37
+r4	    equ	0x38
+count	    equ	0x39
+temp	    equ	0x3a
+
+counterB0   equ	0x40	; Counter - low byte
+counterB1   equ	0x41
+counterB2   equ	0x42
+counterB3   equ	0x43	; Counter - high byte
+	
  
 RES_VECT  CODE    0x0000            ; processor reset vector
     GOTO    START                   ; go to beginning of program
@@ -94,6 +113,7 @@ START
 
     ; LCD	
 	call	LCD_Init
+	call	CNTR_Clear
 	
     ; ****************************************************************
     ; * WELCOME                                                      *
@@ -119,14 +139,6 @@ START
 	call	LCD_Char
 	movlw	'o'
 	call	LCD_Char
-
-	call	LCD_Line2
-	movlw	' '
-	call	LCD_Char
-	movlw	' '
-	call	LCD_Char
-	movlw	' '
-	call	LCD_Char
 	movlw	' '
 	call	LCD_Char
 	movlw	'W'
@@ -139,16 +151,26 @@ START
 	call	LCD_Char
 	movlw	'd'
 	call	LCD_Char
-	
+
+	call	LCD_Line2
+	call	ToBCD
+	call	LCD_BCD
 
 flash	bsf	portBSh,LED
 	movfw	portBSh
 	movwf	PORTB
-	call	Delay1s
+	call	Delay10ms
 	bcf	portBSh,LED
 	movfw	portBSh
 	movwf	PORTB
-	call	Delay1s
+	call	Delay10ms
+	
+	call	LCD_Line2
+	call	CNTR_Inc
+	call	CNTR_Copy
+	call	ToBCD
+	call	LCD_BCD
+	
 	goto	flash
 
     ; ****************************************************************
@@ -336,6 +358,7 @@ _LCD_WriteNibble
     ; * ---------------                                              *
     ; *   The following functions are defined:                       *
     ; *   Delay1s	1 Second                                     *
+    ; *   Delay100ms	100 Milliseconds                             *
     ; *   Delay10ms	10 Milliseconds                              *
     ; *   Delay5ms	5 Milliseconds                               *
     ; *   Delay2ms	2 Milliseconds                               *
@@ -363,6 +386,26 @@ _Delay1s_0
 			;4 cycles (including call)
 	return  
 
+; Delay 100ms
+Delay100ms
+		;199993 cycles
+	movlw	0x3E
+	movwf	delay1
+	movlw	0x9D
+	movwf	delay2
+_Delay_0
+	decfsz	delay1, f
+	goto	$+2
+	decfsz	delay2, f
+	goto	_Delay_0
+
+			;3 cycles
+	goto	$+1
+	nop
+
+			;4 cycles (including call)
+	return	
+	
 ; Delay 10ms
 Delay10ms
 			;19993 cycles
@@ -447,6 +490,207 @@ _Delay10us_0
 			;4 cycles (including call)
 	return	
 
+    ; ****************************************************************
+    ; * BCD FUNCTIONS 24bit                                          *
+    ; * -------------------                                          *
+    ; *   The following functions are defined:                       *
+    ; *   ToBCD	      Convert byte0..3 to BCD in r0-r4               *
+    ; *   LCD_BCD     Display BCD value                              *
+    ; ****************************************************************	
+
+ToBCD
+	bcf	STATUS,C
+	movlw	0x20
+	movwf	count
+	clrf	r0
+	clrf	r1
+	clrf	r2
+	clrf	r3
+	clrf	r4
+_loop16	rlf	byte0,f
+	rlf	byte1,f
+	rlf	byte2,f
+	rlf	byte3,f
+	rlf	r0,f
+	rlf	r1,f
+	rlf	r2,f
+	rlf	r3,f
+	rlf	r4,f
+
+	decfsz	count,1
+	goto	_adjdec
+	retlw	0 
+
+_adjdec	movlw	r4
+	movwf	FSR 
+	call	_adjbcd
+	
+	movlw	r3
+	movwf	FSR 
+	call	_adjbcd
+
+	movlw	r2
+	movwf	FSR 
+	call	_adjbcd
+
+	movlw	r1
+	movwf	FSR
+	call	_adjbcd
+
+	movlw	r0
+	movwf	FSR
+	call	_adjbcd
+
+	goto	_loop16
+
+_adjbcd	movlw	0x03
+	addwf	0,w
+	movwf	temp
+	btfsc	temp,3
+	movwf	0
+	movlw	0x30
+	addwf	0,w
+	movwf	temp
+	btfsc	temp,7
+	movwf	0
+	return	
+
+	
+LCD_BCD
+	movlw	0x30		
+	movwf	temp		;Amount to add to convert to ascii
+	
+				;As all numbers are BCD (1 to 9),
+				;they can be converted to ASCII by 
+				;simply adding 0x30 to each digit. 
+	
+	goto	dt1
+				
+	movf	r4,w		;Check the first digit for a leading zero
+	andlw	0x0f
+	btfss	STATUS,Z
+	goto	dt1		;No LZ, display full freq.
+	swapf	r3,w		;Check the second digit for leading zero.
+	andlw	0x0f
+	btfss	STATUS,Z
+	goto	dt2
+	goto	dt3
+	
+dt1	movf	r4,0		;Get first bcd digit
+	andlw	0x0f		;Mask off other packed bcd digit'	
+	addwf	temp,w		;Convert to ascii (add 0x30)
+	call	LCD_Char	;Display it
+
+dt2	swapf	r3,0		;Get 2nd bcd digit
+	andlw	0x0f		;Mask off other packed bcd digit	
+	addwf	temp,w		;Convert to ascii (add 0x30)
+	call	LCD_Char	;Display it
+
+dt3	movf	r3,0		;Get other bcd digit
+	andlw	0x0f		;Mask off other packed bcd digit
+	addwf	temp,w		;Convert to ascii (add 0x30)
+	call	LCD_Char	;Display it
+
+	
+	swapf	r2,0		;Get next digit
+	andlw	0x0f		;Mask off other packed bcd digit
+	addwf	temp,w
+	call	LCD_Char	;Display it
+	
+	;movlw	'.'		;Decimal point.
+	;call	LCD_Char	
+
+	movf	r2,0		;Get other bcd digit
+	andlw	0x0f		;Mask off other packed bcd digit
+	addwf	temp,w
+	call	LCD_Char
+
+	swapf	r1,0		;Get next digit
+	andlw	0x0f		;Mask off other packed bcd digit
+	addwf	temp,w
+	call	LCD_Char	;Display it
+	
+
+	movf	r1,0		;Get other bcd digit
+	andlw	0x0f
+	addwf	temp,w
+	call	LCD_Char
+	
+	;movlw	'.'		
+	;call	LCD_Char		
+	
+
+	swapf	r0,0		;Get next digit
+	andlw	0x0f		;Mask off other packed bcd digit
+	addwf	temp,w
+	call	LCD_Char	;Display it
+	
+
+	movf	r0,0		;Get other bcd digit
+	andlw	0x0f
+	addwf	temp,w
+	call	LCD_Char	;Display last digit (1hz)
+	
+	movlw	' '		;Write MHz after freq.
+	call	LCD_Char
+	movlw	'M'
+	call	LCD_Char
+	movlw	'H'
+	call	LCD_Char
+	movlw	'z'
+	call	LCD_Char
+	
+	return
+
+    ; ****************************************************************
+    ; * COUNTER FUNCTIONS                                            *
+    ; * ----------------                                             *
+    ; *   The following functions are defined:                       *
+    ; *   CNTR_Clear  Clear counter                                  *
+    ; *   CNTR_Copy   Copy counter to BCD in                         *
+    ; *   CNTR_Inc    Increment counter                              *
+    ; ****************************************************************	
+	
+CNTR_Clear
+	movlw	0
+	movwf	counterB0
+	movwf	counterB1
+	movwf	counterB2
+	movwf	counterB3
+	
+	return 
+
+CNTR_Copy
+	movfw	counterB0
+	movwf	byte0
+	movfw	counterB1
+	movwf	byte1
+	movfw	counterB2
+	movwf	byte2
+	movfw	counterB3
+	movwf	byte3
+	
+	return
+	
+CNTR_Inc
+	
+	incf	counterB0,1
+	btfss	STATUS,Z
+	goto	_incEnd
+
+	incf	counterB1,1
+	btfss	STATUS,Z
+	goto	_incEnd
+
+	incf	counterB2,1
+	btfss	STATUS,Z
+	goto	_incEnd
+
+	incf	counterB3,1
+	
+_incEnd
+	return 
+	
     END
 
 
