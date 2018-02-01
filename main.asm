@@ -92,7 +92,7 @@ START
     ; *   Timers                                                     *
     ; ****************************************************************
 
-    ; Ports
+    ; Ports A and B used for IO
 	banksel	PORTA 
 	clrf	PORTA
 	clrf	portASh
@@ -110,10 +110,26 @@ START
 	movlw	PORTBTRIS
 	movwf	TRISB
 	banksel PORTA
-
+	
+    ; Port C
+	banksel	PORTC
+	clrf	PORTC
+	banksel TRISC
+	movlw	0x01
+	movwf	TRISC
+	banksel	PORTA
+	
+	
     ; LCD	
 	call	LCD_Init
 	call	CNTR_Clear
+
+    ; Timer 1
+	movlw	0x46	;  active low gate, external clock, not runnng
+	movwf	T1CON
+	movlw	0x00	; Clear timer to 0
+	movwf	TMR1H
+	movwf	TMR1L
 	
     ; ****************************************************************
     ; * WELCOME                                                      *
@@ -156,6 +172,9 @@ START
 	call	ToBCD
 	call	LCD_BCD
 
+    ; Start Timer
+	bsf	T1CON,0
+	
 flash	bsf	portBSh,LED
 	movfw	portBSh
 	movwf	PORTB
@@ -165,8 +184,20 @@ flash	bsf	portBSh,LED
 	movwf	PORTB
 	call	Delay10ms
 	
+    ; Stop timer
+        bcf	T1CON,0
+	
+	movfw	TMR1H
+	movwf	counterB1
+
+	movfw	TMR1L
+	movwf	counterB0
+	
+; Re-start Timer
+	bsf	T1CON,0
+	
 	call	LCD_Line2
-	call	CNTR_Inc
+    ;	call	CNTR_Inc
 	call	CNTR_Copy
 	call	ToBCD
 	call	LCD_BCD
