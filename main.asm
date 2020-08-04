@@ -31,7 +31,7 @@ LCD_SH_MASK	equ	0xf0
 ; PORT B 
 ; Bit 0	 OUT   LCD RS - Register Select
 ; Bit 1	 OUT   LCD EN - Enable
-; Bit 2	 OUT   LED
+; Bit 2	 OUT   GATE
 ; Bit 3	 IN   
 ; Bit 4	 IN   
 ; Bit 5	 IN   
@@ -42,7 +42,7 @@ LCD_RS		equ	0
 LCD_EN		equ	1
 LCD_CONTROL	equ	PORTB	    
 LCD_CONTROL_SH	equ	0x21	    
-LED		equ	2	    
+GATE		equ	2	
 	    
 ; General Purpose Registers
 portASh	    equ 0x20	; Port A Shadow register
@@ -74,7 +74,6 @@ counterB0   equ	0x40	; Counter - low byte
 counterB1   equ	0x41
 counterB2   equ	0x42
 counterB3   equ	0x43	; Counter - high byte
-	
  
 RES_VECT  CODE    0x0000            ; processor reset vector
     GOTO    START                   ; go to beginning of program
@@ -171,38 +170,44 @@ START
 	call	LCD_Line2
 	call	ToBCD
 	call	LCD_BCD
-
+   
+    ; Basic loop with a 10ms gate period
     ; Start Timer
-	bsf	T1CON,0
-	
-flash	bsf	portBSh,LED
+fcount	bsf	T1CON,0
+	bcf	portBSh,GATE
 	movfw	portBSh
 	movwf	PORTB
 	call	Delay10ms
-	bcf	portBSh,LED
+	bsf	portBSh,GATE
 	movfw	portBSh
 	movwf	PORTB
-	call	Delay10ms
+	; call	Delay10ms
 	
-    ; Stop timer
+; Stop timer
         bcf	T1CON,0
-	
+
+; Grab current timer counts
 	movfw	TMR1H
 	movwf	counterB1
-
 	movfw	TMR1L
 	movwf	counterB0
+
+; clear the timer	
+	movlw	0
+	movwf	TMR1H
+	movwf	TMR1L
 	
-; Re-start Timer
-	bsf	T1CON,0
-	
+; Update the display
 	call	LCD_Line2
     ;	call	CNTR_Inc
 	call	CNTR_Copy
 	call	ToBCD
 	call	LCD_BCD
+
+; Only update this display every 100ms
+	call	Delay100ms
 	
-	goto	flash
+	goto	fcount
 
     ; ****************************************************************
     ; * LCD FUNCTIONS (4bit)                                         *
